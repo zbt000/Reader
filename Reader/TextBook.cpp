@@ -14,9 +14,19 @@ wchar_t TextBook::m_ValidChapter[] =
     _T('壹'), _T('贰'), _T('叁'), _T('肆'),
     _T('伍'), _T('陆'), _T('柒'), _T('捌'), _T('玖'),
     _T('拾'), _T('佰'), _T('仟'), _T('萬'), _T('億'),
-    _T('两'),
+    _T('两'), _T('〇'),
+    0xFF10, 0xFF11, 0xFF12, 0xFF13, 0xFF14,
+    0xFF15, 0xFF16, 0xFF17, 0xFF18, 0xFF19,
     0x3000
 };
+
+static BOOL IsChapterUnit(wchar_t ch)
+{
+    return ch == _T('卷') || ch == _T('章') || ch == _T('部') || ch == _T('节') || ch == _T('節')
+        || ch == _T('回') || ch == _T('篇') || ch == _T('集') || ch == _T('册')
+        || ch == _T('幕') || ch == _T('编') || ch == _T('话') || ch == _T('話')
+        || ch == _T('讲') || ch == _T('講');
+}
 
 TextBook::TextBook()
 {
@@ -166,8 +176,8 @@ BOOL TextBook::ParserChaptersDefault(void)
     wchar_t title[MAX_CHAPTER_LENGTH] = { 0 };
     int line_size;
     int title_len = 0;
-    BOOL bFound = FALSE;
-    int idx_1 = -1, idx_2 = -1;
+    int idx_1 = -1;
+    std::vector<int> chapter_starts;
     chapter_item_t chapter;
 
     while (TRUE)
@@ -182,65 +192,48 @@ BOOL TextBook::ParserChaptersDefault(void)
             break;
         }
 
-        // check format
-        bFound = FALSE;
+        // Find every chapter marker on this line, not only the first one.
+        chapter_starts.clear();
         idx_1 = -1;
-        idx_2 = -1;
         for (int i = 0; i < line_size; i++)
         {
             if (text[i] == _T('第'))
             {
                 idx_1 = i;
+                continue;
             }
-            if (idx_1 > -1
-                && ((line_size > i + 1 && text[i + 1] == _T(' ')
-                    || text[i + 1] == _T('\t'))
-                    || text[i + 1] == 0x3000 // Full Angle space
-                    || text[i + 1] == 0xA0 // Full Angle space
-                    || line_size <= i + 1)
-                    || text[i + 1] == _T('：')
-                    || text[i + 1] == _T(':'))
+            // Accept the chapter unit immediately after its number; the
+            // title may follow without a space, colon, or other separator.
+            if (idx_1 > -1 && IsChapterUnit(text[i])
+                && IsChapter(text + idx_1 + 1, i - idx_1 - 1))
             {
-                if (text[i] == _T('卷')
-                    || text[i] == _T('章')
-                    || text[i] == _T('部')
-                    || text[i] == _T('节'))
-                {
-                    idx_2 = i;
-                    bFound = TRUE;
-                    break;
-                }
+                chapter_starts.push_back(idx_1);
+                idx_1 = -1;
+                continue;
             }
-            if (idx_1 == -1 && line_size > i + 2 && text[i] == _T('楔') && text[i + 1] == _T('子')
-                && ((text[i + 2] == _T(' ')
-                || text[i + 2] == _T('\t'))
-                || text[i + 2] == 0x3000 // Full Angle space
-                || line_size <= i + 1))
+            if (idx_1 == -1 && i + 1 < line_size && text[i] == _T('楔') && text[i + 1] == _T('子')
+                && (i + 2 == line_size || text[i + 2] == _T(' ') || text[i + 2] == _T('\t')
+                    || text[i + 2] == 0x3000))
             {
-                idx_1 = i;
-                idx_2 = line_size - 1;
-                bFound = TRUE;
-                break;
+                chapter_starts.push_back(i);
             }
-            if (idx_1 == -1 && line_size > i + 2 && text[i] == _T('序') && text[i + 1] == _T('章')
-                && ((text[i + 2] == _T(' ')
-                    || text[i + 2] == _T('\t'))
-                    || text[i + 2] == 0x3000 // Full Angle space
-                    || line_size <= i + 1))
+            if (idx_1 == -1 && i + 1 < line_size && text[i] == _T('序') && text[i + 1] == _T('章')
+                && (i + 2 == line_size || text[i + 2] == _T(' ') || text[i + 2] == _T('\t')
+                    || text[i + 2] == 0x3000))
             {
-                idx_1 = i;
-                idx_2 = line_size - 1;
-                bFound = TRUE;
-                break;
+                chapter_starts.push_back(i);
             }
         }
-        if (bFound && (text[idx_1] == _T('楔') || text[idx_1] == _T('序') || (IsChapter(text + idx_1 + 1, idx_2 - idx_1 - 1))))
+        for (size_t j = 0; j < chapter_starts.size(); j++)
         {
-            title_len = line_size - idx_1 < (MAX_CHAPTER_LENGTH - 1) ? line_size - idx_1 : MAX_CHAPTER_LENGTH - 1;
-            memcpy(title, text + idx_1, title_len * sizeof(wchar_t));
+            int start = chapter_starts[j];
+            int end = (j + 1 < chapter_starts.size()) ? chapter_starts[j + 1] : line_size;
+            title_len = end - start < (MAX_CHAPTER_LENGTH - 1) ? end - start : MAX_CHAPTER_LENGTH - 1;
+            memcpy(title, text + start, title_len * sizeof(wchar_t));
             title[title_len] = 0;
 
-            chapter.index = /*idx_1 +*/ (int)(text - m_Text);
+            // Start at the marker, not at the beginning of the line.
+            chapter.index = (int)(text - m_Text) + start;
             chapter.title = title;
             chapter.title_len = title_len;
             m_Chapters.push_back(chapter);
@@ -364,6 +357,7 @@ BOOL TextBook::ParserChaptersRegex(void)
 BOOL TextBook::IsChapter(wchar_t* text, int len)
 {
     BOOL bFound = FALSE;
+    BOOL bHasNumber = FALSE;
     if (!text || len <= 0)
         return FALSE;
 
@@ -382,6 +376,10 @@ BOOL TextBook::IsChapter(wchar_t* text, int len)
         {
             return FALSE;
         }
+        if (text[i] != _T(' ') && text[i] != _T('\t') && text[i] != 0x3000)
+        {
+            bHasNumber = TRUE;
+        }
     }
-    return TRUE;
+    return bHasNumber;
 }
