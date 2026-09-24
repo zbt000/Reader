@@ -151,6 +151,13 @@ end:
 
 BOOL TextBook::ParserChapters(void)
 {
+    BOOL ret = FALSE;
+
+    if (!m_Rule)
+    {
+        return ParserChaptersDefault();
+    }
+
     if (m_Rule)
     {
         m_Chapters.clear();
@@ -160,14 +167,25 @@ BOOL TextBook::ParserChapters(void)
         }
         else if (m_Rule->rule == 1)
         {
-            return ParserChaptersKeyword();
+            ret = ParserChaptersKeyword();
         }
         else if (m_Rule->rule == 2)
         {
-            return ParserChaptersRegex();
+            ret = ParserChaptersRegex();
+        }
+
+        // The chapter rule is stored globally in .cache.dat. If an old
+        // custom keyword/regex does not match this book, do not leave the
+        // chapter list empty: fall back to the built-in 第...章 detector.
+        // This keeps a stale per-user rule from disabling normal TXT
+        // chapter detection after an upgrade.
+        if (m_Chapters.empty())
+        {
+            m_Chapters.clear();
+            return ParserChaptersDefault();
         }
     }
-    return FALSE;
+    return ret;
 }
 
 BOOL TextBook::ParserChaptersDefault(void)
