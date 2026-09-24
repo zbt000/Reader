@@ -17,7 +17,7 @@ wchar_t TextBook::m_ValidChapter[] =
     _T('两'), _T('〇'),
     0xFF10, 0xFF11, 0xFF12, 0xFF13, 0xFF14,
     0xFF15, 0xFF16, 0xFF17, 0xFF18, 0xFF19,
-    0x3000
+    0x3000, 0xA0
 };
 
 static BOOL IsChapterUnit(wchar_t ch)
@@ -158,33 +158,35 @@ BOOL TextBook::ParserChapters(void)
         return ParserChaptersDefault();
     }
 
-    if (m_Rule)
+    m_Chapters.clear();
+
+    // Always try the built-in detector first. It recognizes ordinary
+    // 第...章 headings even when an old custom rule is still stored in
+    // .cache.dat for another book.
+    if (ParserChaptersDefault() && !m_Chapters.empty())
+    {
+        return TRUE;
+    }
+
+    m_Chapters.clear();
+    if (m_Rule->rule == 1)
+    {
+        ret = ParserChaptersKeyword();
+    }
+    else if (m_Rule->rule == 2)
+    {
+        ret = ParserChaptersRegex();
+    }
+
+    // The chapter rule is stored globally in .cache.dat. If an old
+    // custom keyword/regex does not match this book, do not leave the
+    // chapter list empty: fall back to the built-in detector.
+    if (m_Chapters.empty())
     {
         m_Chapters.clear();
-        if (m_Rule->rule == 0)
-        {
-            return ParserChaptersDefault();
-        }
-        else if (m_Rule->rule == 1)
-        {
-            ret = ParserChaptersKeyword();
-        }
-        else if (m_Rule->rule == 2)
-        {
-            ret = ParserChaptersRegex();
-        }
-
-        // The chapter rule is stored globally in .cache.dat. If an old
-        // custom keyword/regex does not match this book, do not leave the
-        // chapter list empty: fall back to the built-in 第...章 detector.
-        // This keeps a stale per-user rule from disabling normal TXT
-        // chapter detection after an upgrade.
-        if (m_Chapters.empty())
-        {
-            m_Chapters.clear();
-            return ParserChaptersDefault();
-        }
+        return ParserChaptersDefault();
     }
+
     return ret;
 }
 
